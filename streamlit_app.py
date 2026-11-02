@@ -37,6 +37,24 @@ st.markdown("""
     border-radius:8px;
     padding:12px 14px;
 }
+.source-strip {
+    display:flex;
+    gap:10px;
+    flex-wrap:wrap;
+    margin:8px 0 18px 0;
+}
+.source-badge {
+    display:inline-block;
+    padding:7px 11px;
+    border-radius:999px;
+    background:#eef6f8;
+    border:1px solid #cfe3e8;
+    font-size:.88rem;
+    font-weight:600;
+}
+.source-badge.live {background:#eaf8ef; border-color:#bfe3c9; color:#176b35;}
+.source-badge.controlled {background:#fff7e6; border-color:#efd8a5; color:#8a5a00;}
+.source-badge.safe {background:#eef2ff; border-color:#ced8ff; color:#3346a8;}
 </style>
 """, unsafe_allow_html=True)
 
@@ -238,17 +256,44 @@ st.markdown("""
 with st.sidebar:
     st.header("Ρυθμίσεις")
     mode = st.radio("Πηγή δεδομένων", ["Demo Mode", "Upload CSV", "Live Moodle Data"], index=0)
-    st.caption("Demo Mode: ελεγχόμενα δεδομένα. Upload CSV: δικό σου αρχείο. Live Moodle Data: απευθείας read-only ανάγνωση από το Moodle για το Service 21.")
+    st.caption(
+        "Demo Mode: ελεγχόμενα δεδομένα επίδειξης. "
+        "Upload CSV: ανάλυση δικού σου αρχείου. "
+        "Live Moodle Data: live read-only Moodle δεδομένα όπου είναι διαθέσιμα."
+    )
+    if mode == "Live Moodle Data":
+        if st.button("🔄 Ανανέωση live δεδομένων", use_container_width=True):
+            st.rerun()
     st.divider()
-    st.markdown("**Κατάσταση prototype:** v0.3")
-    st.markdown("Moodle integration: Service 21 live + Service 26 hybrid live")
-    st.markdown("Official grade writes: **0**")
+    st.markdown("**Έκδοση demo:** v0.4")
+    st.markdown("**Moodle integration:** Service 21 live · Service 26 hybrid live")
+    st.markdown("**Official grade writes:** 0")
+    st.link_button("Άνοιγμα Moodle Demo", "https://contentsolutions.eu/course/view.php?id=6", use_container_width=True)
 
 tab1, tab2, tab3 = st.tabs(["Service 21 · Ποιότητα αξιολόγησης", "Service 26 · Ανατροφοδότηση", "Τεχνική εικόνα"])
 
 with tab1:
     st.title("Service 21 · Ποιότητα αξιολόγησης")
     st.write("Ποιες ερωτήσεις λειτουργούν καλά και ποιες χρειάζονται επανέλεγχο;")
+    if mode == "Live Moodle Data":
+        st.markdown(
+            '<div class="source-strip">'
+            '<span class="source-badge live">● LIVE Moodle responses</span>'
+            '<span class="source-badge safe">Read-only</span>'
+            '<span class="source-badge safe">Χωρίς προσωπικά στοιχεία</span>'
+            '</div>',
+            unsafe_allow_html=True,
+        )
+    elif mode == "Upload CSV":
+        st.markdown(
+            '<div class="source-strip"><span class="source-badge">CSV που ανέβηκε από τον χρήστη</span></div>',
+            unsafe_allow_html=True,
+        )
+    else:
+        st.markdown(
+            '<div class="source-strip"><span class="source-badge controlled">Controlled demo dataset</span></div>',
+            unsafe_allow_html=True,
+        )
     s21_table = S21_DEMO.copy()
     alpha = 0.67103
     n_attempts = 50
@@ -300,6 +345,25 @@ with tab1:
 with tab2:
     st.title("Service 26 · Ανατροφοδότηση εξάσκησης")
     st.write("Βελτιώθηκε ο εκπαιδευόμενος μετά την ανατροφοδότηση και πότε χρειάζεται ανθρώπινος έλεγχος;")
+    if mode == "Live Moodle Data":
+        st.markdown(
+            '<div class="source-strip">'
+            '<span class="source-badge live">● LIVE Moodle enrolment</span>'
+            '<span class="source-badge controlled">Controlled practice attempts</span>'
+            '<span class="source-badge safe">Read-only · 0 grade writes</span>'
+            '</div>',
+            unsafe_allow_html=True,
+        )
+    elif mode == "Upload CSV":
+        st.markdown(
+            '<div class="source-strip"><span class="source-badge">CSV που ανέβηκε από τον χρήστη</span></div>',
+            unsafe_allow_html=True,
+        )
+    else:
+        st.markdown(
+            '<div class="source-strip"><span class="source-badge controlled">Controlled demo dataset</span></div>',
+            unsafe_allow_html=True,
+        )
     summary = dict(S26_DEMO)
     uploaded_df = None
     clean_pairs = None
@@ -325,17 +389,25 @@ with tab2:
                 f"Practice attempts: controlled server-side POC · "
                 f"Τελευταία ανάγνωση: {live26_payload.get('generated_at','—')}"
             )
-            st.warning(
-                "Προέλευση Service 26: το enrolment count είναι live από Moodle. "
-                "Τα 100 practice attempts παραμένουν controlled server-side δεδομένα επίδειξης και δεν παρουσιάζονται ως native Moodle attempt records."
+            st.info(
+                "Το live στοιχείο εδώ είναι οι ενεργές εγγραφές του Moodle. "
+                "Τα 100 practice attempts είναι ελεγχόμενο server-side POC dataset και χρησιμοποιούνται μόνο για την επίδειξη της ροής feedback."
             )
         except Exception as e:
             st.error(f"Service 26 Live Moodle σύνδεση: {e}")
-    c1, c2, c3, c4 = st.columns(4)
-    c1.metric("Εκπαιδευόμενοι", summary["learners"])
-    c2.metric("1η προσπάθεια", f"{summary['attempt1']:.2f}")
-    c3.metric("2η προσπάθεια", f"{summary['attempt2']:.2f}", delta=f"+{summary['mean_gain']:.2f}")
-    c4.metric("Βελτιώθηκαν", f"{summary['improved']}/{summary['learners']}")
+    if mode == "Live Moodle Data" and live26_payload is not None:
+        c0, c1, c2, c3, c4 = st.columns(5)
+        c0.metric("Live εγγραφές Moodle", live26_payload.get("moodle_enrolled_active", "—"))
+        c1.metric("POC εκπαιδευόμενοι", summary["learners"])
+        c2.metric("1η προσπάθεια", f"{summary['attempt1']:.2f}")
+        c3.metric("2η προσπάθεια", f"{summary['attempt2']:.2f}", delta=f"+{summary['mean_gain']:.2f}")
+        c4.metric("Βελτιώθηκαν", f"{summary['improved']}/{summary['learners']}")
+    else:
+        c1, c2, c3, c4 = st.columns(4)
+        c1.metric("Εκπαιδευόμενοι", summary["learners"])
+        c2.metric("1η προσπάθεια", f"{summary['attempt1']:.2f}")
+        c3.metric("2η προσπάθεια", f"{summary['attempt2']:.2f}", delta=f"+{summary['mean_gain']:.2f}")
+        c4.metric("Βελτιώθηκαν", f"{summary['improved']}/{summary['learners']}")
     before_after = pd.DataFrame(
         {"Μέση επίδοση": [summary["attempt1"], summary["attempt2"]]},
         index=["1η προσπάθεια", "2η προσπάθεια"]
@@ -349,16 +421,27 @@ with tab2:
         )
         st.subheader("Αυτόματη ροή και ανθρώπινος έλεγχος")
         st.bar_chart(status_df)
-    if mode == "Demo Mode":
+    if mode in ["Demo Mode", "Live Moodle Data"]:
         st.subheader("Τελικό επίπεδο μετά τη 2η προσπάθεια")
+        st.caption("Η κατανομή mastery προέρχεται από το controlled practice-attempt POC dataset.")
         st.bar_chart(S26_MASTERY.set_index("Επίπεδο"))
-    st.markdown(
-        f"""<div class="small-note"><b>Μήνυμα για τον πελάτη:</b>
-        {summary['improved']} από {summary['learners']} εκπαιδευόμενους βελτιώθηκαν.
-        Η μέση μεταβολή ήταν {summary['mean_gain']:.2f} μονάδες.
-        Δεν έγινε καμία εγγραφή επίσημου βαθμού.</div>""",
-        unsafe_allow_html=True
-    )
+    if mode == "Live Moodle Data" and live26_payload is not None:
+        st.markdown(
+            f"""<div class="small-note"><b>Μήνυμα για τον πελάτη:</b>
+            Το Moodle επιβεβαιώνει live {live26_payload.get('moodle_enrolled_active','—')} ενεργές εγγραφές.
+            Στο controlled feedback POC, {summary['improved']} από {summary['learners']} εκπαιδευόμενους βελτιώθηκαν
+            με μέση μεταβολή {summary['mean_gain']:.2f} μονάδες.
+            Δεν έγινε καμία εγγραφή επίσημου βαθμού.</div>""",
+            unsafe_allow_html=True
+        )
+    else:
+        st.markdown(
+            f"""<div class="small-note"><b>Μήνυμα για τον πελάτη:</b>
+            {summary['improved']} από {summary['learners']} εκπαιδευόμενους βελτιώθηκαν.
+            Η μέση μεταβολή ήταν {summary['mean_gain']:.2f} μονάδες.
+            Δεν έγινε καμία εγγραφή επίσημου βαθμού.</div>""",
+            unsafe_allow_html=True
+        )
     with st.expander("Τεχνική τεκμηρίωση Service 26", expanded=False):
         st.write("Η εφαρμογή συγκρίνει την πρώτη και τη δεύτερη προσπάθεια ανά εκπαιδευόμενο.")
         st.json({
@@ -387,7 +470,9 @@ with tab3:
 4. Customer-facing KPI και charts
 5. Τεχνικά στοιχεία πίσω από expanders
     """)
-    st.info("Το Service 21 υποστηρίζει live read-only response data. Το Service 26 υποστηρίζει hybrid live mode: live Moodle enrolment και controlled server-side practice-attempt summary, με σαφή provenance.")
+    st.success("Service 21: live read-only Moodle responses → Python psychometrics μέσα στο Streamlit.")
+    st.info("Service 26: live Moodle enrolment + controlled practice-attempt POC, με ρητή διάκριση προέλευσης.")
+    st.markdown("**Ασφάλεια:** κανένα προσωπικό στοιχείο δεν απαιτείται από τα live endpoints και δεν γίνεται εγγραφή επίσημου βαθμού.")
     with st.expander("Όρια του demo", expanded=False):
         st.write(
             "Τα δεδομένα επίδειξης είναι controlled/synthetic. "
