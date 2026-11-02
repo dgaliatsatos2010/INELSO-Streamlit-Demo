@@ -162,6 +162,44 @@ def s21_from_live_moodle():
     )
     return table, alpha, int(payload.get("attempts", len(df))), payload
 
+
+def s26_from_live_moodle():
+    try:
+        api_url = st.secrets["INELSO_S26_LIVE_API_URL"]
+        api_token = st.secrets["INELSO_LIVE_API_TOKEN"]
+    except Exception:
+        raise RuntimeError("Δεν έχουν ρυθμιστεί τα Streamlit Secrets για το Service 26 Live API.")
+
+    response = requests.get(
+        api_url,
+        headers={"X-INELSO-Token": api_token},
+        timeout=20,
+    )
+    response.raise_for_status()
+    payload = response.json()
+
+    if not payload.get("ok"):
+        raise RuntimeError(payload.get("error", "Το Service 26 Live API επέστρεψε σφάλμα."))
+
+    ctrl = payload.get("controlled", {})
+    summary = {
+        "learners": int(ctrl.get("learners", 0)),
+        "attempts": int(ctrl.get("practice_attempts", 0)),
+        "attempt1": float(ctrl.get("attempt1_mean", np.nan)),
+        "attempt2": float(ctrl.get("attempt2_mean", np.nan)),
+        "mean_gain": float(ctrl.get("mean_gain", np.nan)),
+        "median_gain": float(ctrl.get("median_gain", np.nan)),
+        "improved": int(ctrl.get("improved", 0)),
+        "unchanged": int(ctrl.get("unchanged", 0)),
+        "declined": int(ctrl.get("declined", 0)),
+        "ready": int(ctrl.get("ready", 0)),
+        "review": int(ctrl.get("human_review", 0)),
+        "grade_writes": int(ctrl.get("official_grade_writes", 0)),
+        "confidence1": float(ctrl.get("confidence_attempt1", np.nan)),
+        "confidence2": float(ctrl.get("confidence_attempt2", np.nan)),
+    }
+    return summary, payload
+
 def s26_from_upload(uploaded):
     df = pd.read_csv(uploaded)
     required = {"learner_id", "attempt", "score"}
@@ -202,8 +240,8 @@ with st.sidebar:
     mode = st.radio("Πηγή δεδομένων", ["Demo Mode", "Upload CSV", "Live Moodle Data"], index=0)
     st.caption("Demo Mode: ελεγχόμενα δεδομένα. Upload CSV: δικό σου αρχείο. Live Moodle Data: απευθείας read-only ανάγνωση από το Moodle για το Service 21.")
     st.divider()
-    st.markdown("**Κατάσταση prototype:** v0.1")
-    st.markdown("Moodle integration: επόμενο deployment βήμα")
+    st.markdown("**Κατάσταση prototype:** v0.3")
+    st.markdown("Moodle integration: Service 21 live + Service 26 hybrid live")
     st.markdown("Official grade writes: **0**")
 
 tab1, tab2, tab3 = st.tabs(["Service 21 · Ποιότητα αξιολόγησης", "Service 26 · Ανατροφοδότηση", "Τεχνική εικόνα"])
@@ -265,6 +303,7 @@ with tab2:
     summary = dict(S26_DEMO)
     uploaded_df = None
     clean_pairs = None
+    live26_payload = None
     if mode == "Upload CSV":
         up26 = st.file_uploader(
             "CSV Service 26 — απαιτούμενες στήλες: learner_id, attempt, score. Προαιρετικές: confidence, status",
@@ -276,6 +315,22 @@ with tab2:
                 st.success("Το CSV αναλύθηκε επιτυχώς.")
             except Exception as e:
                 st.error(str(e))
+    elif mode == "Live Moodle Data":
+        try:
+            summary, live26_payload = s26_from_live_moodle()
+            enrolled = live26_payload.get("moodle_enrolled_active", "—")
+            st.success("Συνδέθηκε επιτυχώς με το Moodle σε hybrid read-only λειτουργία.")
+            st.caption(
+                f"Live Moodle: {enrolled} ενεργές εγγραφές στο course ID {live26_payload.get('courseid','—')} · "
+                f"Practice attempts: controlled server-side POC · "
+                f"Τελευταία ανάγνωση: {live26_payload.get('generated_at','—')}"
+            )
+            st.warning(
+                "Προέλευση Service 26: το enrolment count είναι live από Moodle. "
+                "Τα 100 practice attempts παραμένουν controlled server-side δεδομένα επίδειξης και δεν παρουσιάζονται ως native Moodle attempt records."
+            )
+        except Exception as e:
+            st.error(f"Service 26 Live Moodle σύνδεση: {e}")
     c1, c2, c3, c4 = st.columns(4)
     c1.metric("Εκπαιδευόμενοι", summary["learners"])
     c2.metric("1η προσπάθεια", f"{summary['attempt1']:.2f}")
@@ -332,7 +387,7 @@ with tab3:
 4. Customer-facing KPI και charts
 5. Τεχνικά στοιχεία πίσω από expanders
     """)
-    st.info("Το Service 21 υποστηρίζει πλέον Demo Mode, Upload CSV και Live Moodle Data μέσω read-only API. Το Service 26 παραμένει Demo/CSV μέχρι να ενεργοποιηθεί το αντίστοιχο live endpoint.")
+    st.info("Το Service 21 υποστηρίζει live read-only response data. Το Service 26 υποστηρίζει hybrid live mode: live Moodle enrolment και controlled server-side practice-attempt summary, με σαφή provenance.")
     with st.expander("Όρια του demo", expanded=False):
         st.write(
             "Τα δεδομένα επίδειξης είναι controlled/synthetic. "
