@@ -3,6 +3,7 @@ from pathlib import Path
 
 import numpy as np
 import pandas as pd
+import requests
 import streamlit as st
 
 st.set_page_config(
@@ -118,6 +119,49 @@ def s21_from_upload(uploaded):
     )
     return table, alpha, len(numeric)
 
+
+def s21_from_live_moodle():
+    try:
+        api_url = st.secrets["INELSO_LIVE_API_URL"]
+        api_token = st.secrets["INELSO_LIVE_API_TOKEN"]
+    except Exception:
+        raise RuntimeError("Δεν έχουν ρυθμιστεί τα Streamlit Secrets για το Live Moodle API.")
+
+    response = requests.get(
+        api_url,
+        headers={"X-INELSO-Token": api_token},
+        timeout=20,
+    )
+    response.raise_for_status()
+    payload = response.json()
+
+    if not payload.get("ok"):
+        raise RuntimeError(payload.get("error", "Το Live Moodle API επέστρεψε σφάλμα."))
+
+    items = [x.get("id", f"Q{i+1:02d}") for i, x in enumerate(payload.get("items", []))]
+    matrix = payload.get("matrix", [])
+    if not matrix or not items:
+        raise RuntimeError("Δεν επιστράφηκαν ολοκληρωμένες προσπάθειες από το Moodle.")
+
+    df = pd.DataFrame(matrix, columns=items)
+    df = df.apply(pd.to_numeric, errors="coerce")
+    facility = df.mean(axis=0) * 100
+    citc = corrected_item_total(df) * 100
+    alpha = cronbach_alpha(df)
+
+    table = pd.DataFrame({
+        "Ερώτηση": items,
+        "Ποσοστό σωστών (%)": facility.values,
+        "Δείκτης διάκρισης (%)": citc.values,
+    })
+    table["Ερμηνεία"] = np.where(
+        table["Δείκτης διάκρισης (%)"] < 0,
+        "Χρειάζεται έλεγχο",
+        np.where(table["Ποσοστό σωστών (%)"] >= 85, "Πολύ εύκολη",
+                 np.where(table["Ποσοστό σωστών (%)"] <= 20, "Πολύ δύσκολη", "Κανονική"))
+    )
+    return table, alpha, int(payload.get("attempts", len(df))), payload
+
 def s26_from_upload(uploaded):
     df = pd.read_csv(uploaded)
     required = {"learner_id", "attempt", "score"}
@@ -155,8 +199,8 @@ st.markdown("""
 
 with st.sidebar:
     st.header("Ρυθμίσεις")
-    mode = st.radio("Πηγή δεδομένων", ["Demo Mode", "Upload CSV"], index=0)
-    st.caption("Το Demo Mode χρησιμοποιεί τα ελεγχόμενα αποτελέσματα της υπάρχουσας επίδειξης.")
+    mode = st.radio("Πηγή δεδομένων", ["Demo Mode", "Upload CSV", "Live Moodle Data"], index=0)
+    st.caption("Demo Mode: ελεγχόμενα δεδομένα. Upload CSV: δικό σου αρχείο. Live Moodle Data: απευθείας read-only ανάγνωση από το Moodle για το Service 21.")
     st.divider()
     st.markdown("**Κατάσταση prototype:** v0.1")
     st.markdown("Moodle integration: επόμενο deployment βήμα")
@@ -170,6 +214,7 @@ with tab1:
     s21_table = S21_DEMO.copy()
     alpha = 0.67103
     n_attempts = 50
+    live_payload = None
     if mode == "Upload CSV":
         up21 = st.file_uploader(
             "CSV Service 21 — μία γραμμή ανά προσπάθεια, μία αριθμητική/δυαδική στήλη ανά ερώτηση",
@@ -181,6 +226,17 @@ with tab1:
                 st.success("Το CSV αναλύθηκε επιτυχώς.")
             except Exception as e:
                 st.error(str(e))
+    elif mode == "Live Moodle Data":
+        try:
+            s21_table, alpha, n_attempts, live_payload = s21_from_live_moodle()
+            st.success("Συνδέθηκε επιτυχώς με το Moodle σε read-only λειτουργία.")
+            st.caption(
+                f"Live πηγή: {live_payload.get('quiz_name','Moodle quiz')} · "
+                f"CMID {live_payload.get('cmid','—')} · "
+                f"Τελευταία ανάγνωση: {live_payload.get('generated_at','—')}"
+            )
+        except Exception as e:
+            st.error(f"Live Moodle σύνδεση: {e}")
     c1, c2, c3, c4 = st.columns(4)
     c1.metric("Προσπάθειες", f"{n_attempts}")
     c2.metric("Μέση επίδοση", f"{s21_table['Ποσοστό σωστών (%)'].mean():.2f}%")
@@ -201,7 +257,7 @@ with tab1:
         st.write("Η ευκολία υπολογίζεται ως ποσοστό σωστών απαντήσεων. Ο δείκτης διάκρισης εδώ είναι corrected item–total correlation.")
         st.dataframe(s21_table, use_container_width=True, hide_index=True)
         st.write("Cronbach’s alpha:", "—" if not np.isfinite(alpha) else f"{alpha:.5f}")
-        st.caption("Στο υπάρχον live demo, τα πραγματικά Moodle responses επαληθεύονται με ανεξάρτητη server-side Python ανάλυση.")
+        st.caption("Στο Live Moodle Data mode, το response matrix έρχεται read-only από το Moodle API και τα psychometric metrics υπολογίζονται ξανά μέσα στο Streamlit.")
 
 with tab2:
     st.title("Service 26 · Ανατροφοδότηση εξάσκησης")
@@ -276,7 +332,7 @@ with tab3:
 4. Customer-facing KPI και charts
 5. Τεχνικά στοιχεία πίσω από expanders
     """)
-    st.info("Στο επόμενο deployment βήμα θα συνδέσουμε τη Streamlit εφαρμογή με το υπάρχον Moodle/server περιβάλλον. Μέχρι τότε, το v0.1 λειτουργεί αυτόνομα και με CSV upload.")
+    st.info("Το Service 21 υποστηρίζει πλέον Demo Mode, Upload CSV και Live Moodle Data μέσω read-only API. Το Service 26 παραμένει Demo/CSV μέχρι να ενεργοποιηθεί το αντίστοιχο live endpoint.")
     with st.expander("Όρια του demo", expanded=False):
         st.write(
             "Τα δεδομένα επίδειξης είναι controlled/synthetic. "
